@@ -5,6 +5,7 @@
 import numpy as np
 import rasterio
 from rasterio.enums import Resampling
+from rasterio.warp import reproject
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -27,41 +28,64 @@ def load_geotiff(path):
     return data, meta, transform, crs
 
 
+
 def resample_to_match(source_path, reference_path, output_path):
     """
-    Resample source raster to match reference raster resolution.
-    Used to bring 30m terrain (TWI/TRI) to 10m Sentinel resolution.
-    Uses bilinear interpolation — correct for continuous terrain data.
+    Reproject/resample a source raster onto the exact grid of
+    a reference raster. Suitable for continuous terrain indices.
     """
-    with rasterio.open(reference_path) as ref:
-        target_transform = ref.transform
-        target_crs       = ref.crs
-        target_height    = ref.height
-        target_width     = ref.width
-        target_meta      = ref.meta.copy()
-
-    with rasterio.open(source_path) as src:
-        data = src.read(
-            out_shape=(
-                src.count,
-                target_height,
-                target_width
-            ),
-            resampling=Resampling.bilinear
-        ).astype(np.float32)
-
-    target_meta.update({
-        'count': data.shape[0],
-        'dtype': 'float32'
-    })
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with rasterio.open(output_path, 'w', **target_meta) as dst:
-        dst.write(data)
 
-    print(f"Resampled {os.path.basename(source_path)} → "
-          f"{target_height}×{target_width} px")
-    return data
+    with rasterio.open(reference_path) as ref:
+        target_transform = ref.transform
+        target_crs = ref.crs
+        target_height = ref.height
+        target_width = ref.width
+        target_meta = ref.meta.copy()
+
+        with rasterio.open(source_path) as src:
+            if src.crs is None or target_crs is None:
+                raise ValueError("Both rasters must have a defined CRS.")
+
+            destination = np.full(
+                (src.count, target_height, target_width),
+                np.nan,
+                dtype=np.float32
+            )
+
+            for band_idx in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, band_idx),
+                    destination=destination[band_idx - 1],
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    src_nodata=src.nodata,
+                    dst_transform=target_transform,
+                    dst_crs=target_crs,
+                    dst_nodata=np.nan,
+                    resampling=Resampling.bilinear
+                )
+
+    target_meta.update({
+        "height": target_height,
+        "width": target_width,
+        "transform": target_transform,
+        "crs": target_crs,
+        "count": destination.shape[0],
+        "dtype": "float32",
+        "nodata": np.nan
+    })
+
+    with rasterio.open(output_path, "w", **target_meta) as dst:
+        dst.write(destination)
+
+    print(
+        f"Terrain aligned to reference grid: "
+        f"{target_height} x {target_width}"
+    )
+
+    return destination
 
 
 def normalize_features(features, channel_names=None, bounds=None):

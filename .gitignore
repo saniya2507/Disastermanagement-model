@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Keep large datasets locally
+data/assam_2022_features_normalized.tif
+data/assam_2022_feature_stack.tif
+data/assam_2022_feature_stack_f.tif
+data/assam_terrain_stack_30m.tif
+data/assam_terrain_stack_30m_f.tif
